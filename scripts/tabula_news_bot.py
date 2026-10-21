@@ -1026,6 +1026,44 @@ def build_technical_sheet_html(game):
 </div>
 """
 
+def format_editorial_paragraphs(raw_paragraphs, source_name, is_second_part=False):
+    output_html = ""
+    first_person_patterns = [
+        r'\b(eu|nós|nos|nosso|nossos|nossa|nossas|minha|meu|meus|minhas|tive|decidi|percebemos|queríamos|estávamos|jogamos|testamos|vimos)\b',
+        r'\b(i|we|my|our|us|mine|ours)\b'
+    ]
+
+    for idx, p in enumerate(raw_paragraphs):
+        p_trans = translate_to_pt(p).strip()
+        if len(p_trans) < 35:
+            continue
+
+        # Detectar declarações em primeira pessoa da equipe/designer
+        is_quote = any(re.search(pat, p_trans, re.I) for pat in first_person_patterns) or any(re.search(pat, p, re.I) for pat in first_person_patterns)
+
+        if is_quote:
+            lead_in_options = [
+                f'Em declaração oficial sobre o projeto, a equipe destacou:',
+                f'Ao detalhar as decisões de produção e design, os responsáveis pontuaram:',
+                f'Segundo comunicado e apontamentos da equipe criativa:',
+                f'Sobre a experiência na mesa e os testes práticos, foi ressaltado:'
+            ]
+            lead_in = lead_in_options[(idx + (2 if is_second_part else 0)) % len(lead_in_options)]
+
+            output_html += f'''<p style="margin-bottom: 12px; line-height: 1.8; color: var(--text-main, #d1d5db); font-size: 1.05rem;">{lead_in}</p>
+<blockquote style="margin: 20px 0 26px 0; padding: 18px 24px; border-left: 4px solid var(--tq-yellow, #f5b800); background: rgba(245, 184, 0, 0.05); border-radius: 0 12px 12px 0; font-style: italic; color: #f3f4f6; font-size: 1.02rem; line-height: 1.7;">
+  "{p_trans}"
+  <span style="display: block; margin-top: 8px; font-size: 0.85rem; font-style: normal; color: var(--text-muted, #9ca3af); font-weight: 600;">— {html.escape(source_name)}</span>
+</blockquote>\n'''
+        else:
+            if idx == 0 and not is_second_part:
+                p_text = f'De acordo com as informações apuradas junto a <em>{html.escape(source_name)}</em>, {p_trans[0].lower() + p_trans[1:] if len(p_trans) > 1 else p_trans}'
+            else:
+                p_text = p_trans
+            output_html += f'<p style="margin-bottom: 22px; line-height: 1.8; color: var(--text-main, #d1d5db); font-size: 1.05rem;">{p_text}</p>\n'
+
+    return output_html
+
 def generate_editorial_post(item):
     if item.get('is_youtube'):
         clean_title = item['title']
@@ -1179,23 +1217,8 @@ def generate_editorial_post(item):
 
 
 
-    paragraphs_part1 = ""
-
-    for p in first_ps:
-
-        p_translated = translate_to_pt(p)
-
-        paragraphs_part1 += f"<p>{p_translated}</p>\n"
-
-
-
-    paragraphs_part2 = ""
-
-    for p in second_ps:
-
-        p_translated = translate_to_pt(p)
-
-        paragraphs_part2 += f"<p>{p_translated}</p>\n"
+    paragraphs_part1 = format_editorial_paragraphs(first_ps, source, is_second_part=False)
+    paragraphs_part2 = format_editorial_paragraphs(second_ps, source, is_second_part=True)
 
 
 
