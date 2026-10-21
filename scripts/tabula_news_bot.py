@@ -379,231 +379,142 @@ def is_already_published(link, history, existing_slugs):
 # ------------------------------------------------------------------------------
 
 def translate_to_pt(text):
-
     if not text:
-
         return ""
 
-
-
     # Remove tags promocionais ou de anúncios
-
     text = re.sub(r'\s*[\(\[]Sponsored[\)\]]', '', text, flags=re.I)
-
     text = re.sub(r'\s*[\(\[]Ad[\)\]]', '', text, flags=re.I)
-
     text = text.strip()
+    if not text:
+        return ""
 
+    # 1. Funções internas de tradução multi-motor
+    def _call_gtx(q_str):
+        try:
+            url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=pt&dt=t'
+            data = urllib.parse.urlencode({'q': q_str}).encode('utf-8')
+            req = urllib.request.Request(url, data=data, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*'
+            })
+            with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
+                res = json.loads(r.read().decode('utf-8'))
+                if res and isinstance(res, list) and len(res) > 0 and isinstance(res[0], list):
+                    parts = [part[0] for part in res[0] if part and len(part) > 0 and part[0]]
+                    trans = ''.join(parts).strip()
+                    if trans:
+                        return trans
+        except Exception:
+            pass
+        return None
 
+    def _call_clients5(q_str):
+        try:
+            url = 'https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=pt&q=' + urllib.parse.quote(q_str[:1500])
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+            with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+                res = json.loads(r.read().decode('utf-8'))
+                if isinstance(res, list) and len(res) > 0 and isinstance(res[0], str):
+                    return res[0].strip()
+        except Exception:
+            pass
+        return None
 
-    # 1. Se o texto parecer estar em inglês, traduz via MyMemory API
+    def _call_mymemory(q_str):
+        try:
+            url = 'https://api.mymemory.translated.net/get?q=' + urllib.parse.quote(q_str[:400]) + '&langpair=en|pt-BR'
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=6, context=ctx) as r:
+                data = json.loads(r.read().decode('utf-8'))
+                trans = data.get('responseData', {}).get('translatedText')
+                if trans and not trans.startswith('MYMEMORY WARNING') and len(trans.strip()) > 2:
+                    return html.unescape(trans).strip()
+        except Exception:
+            pass
+        return None
 
-    words = text.lower().split()
+    # 2. Dividir em blocos caso o parágrafo seja muito longo (> 2000 caracteres)
+    chunks = []
+    if len(text) > 2000:
+        sentences = re.split(r'(\.\s+|\n+)', text)
+        curr = ""
+        for s in sentences:
+            if len(curr + s) < 1800:
+                curr += s
+            else:
+                if curr: chunks.append(curr)
+                curr = s
+        if curr: chunks.append(curr)
+    else:
+        chunks = [text]
 
-    en_markers = {
+    translated_chunks = []
+    for c in chunks:
+        c_clean = c.strip()
+        if not c_clean:
+            continue
+        # Motor 1: Google GTX POST (rápido, ilimitado, alta precisão)
+        t = _call_gtx(c_clean)
+        if not t:
+            # Motor 2: Google Clients5 fallback
+            t = _call_clients5(c_clean)
+        if not t:
+            # Motor 3: MyMemory fallback
+            t = _call_mymemory(c_clean)
+        if not t:
+            t = c_clean
+        translated_chunks.append(t)
 
-        'the', 'and', 'with', 'from', 'this', 'that', 'game', 'board', 'new', 
+    res = " ".join(translated_chunks) if translated_chunks else text
 
-        'release', 'tabletop', 'revealed', 'announced', 'designer', 'diary', 
-
-        'expansion', 'players', 'cards', 'brings', 'rules', 'edition', 'first'
-
-    }
-
-    en_count = sum(1 for w in words if w in en_markers)
-
-
-
-    res = text
-
-    if en_count >= 1:
-
-        # Dividir em blocos de até 380 caracteres se o texto for longo
-
-        chunks = []
-
-        if len(text) > 380:
-
-            sentences = re.split(r'(\. |\n)', text)
-
-            curr = ""
-
-            for s in sentences:
-
-                if len(curr + s) < 380:
-
-                    curr += s
-
-                else:
-
-                    if curr: chunks.append(curr)
-
-                    curr = s
-
-            if curr: chunks.append(curr)
-
-        else:
-
-            chunks = [text]
-
-
-
-        translated_chunks = []
-
-        for chunk in chunks:
-
-            chunk_trim = chunk.strip()
-
-            if not chunk_trim: continue
-
-            try:
-
-                url = 'https://api.mymemory.translated.net/get?q=' + urllib.parse.quote(chunk_trim) + '&langpair=en|pt-BR'
-
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0)'})
-
-                with urllib.request.urlopen(req, timeout=5, context=ctx) as r:
-
-                    data = json.loads(r.read().decode('utf-8'))
-
-                    trans = data.get('responseData', {}).get('translatedText')
-
-                    if trans and not trans.startswith('MYMEMORY WARNING') and len(trans.strip()) > 2:
-
-                        translated_chunks.append(html.unescape(trans))
-
-                    else:
-
-                        translated_chunks.append(chunk_trim)
-
-            except Exception:
-
-                translated_chunks.append(chunk_trim)
-
-
-
-        if translated_chunks:
-
-            res = " ".join(translated_chunks)
-
-
-
-    # 2. Refinamento com terminologia técnica do hobby
-
+    # 3. Pós-processamento de padronização editorial brasileira do universo analógico
     terms = {
-
-        "tabletop roleplaying game": "RPG de mesa",
-
-        "tabletop roleplaying games": "RPGs de mesa",
-
-        "tabletop roleplay": "RPG de mesa",
-
-        "roleplaying game": "RPG",
-
-        "roleplaying games": "RPGs",
-
-        "board game": "jogo de tabuleiro",
-
-        "board games": "jogos de tabuleiro",
-
-        "trading card game": "card game colecionável (TCG)",
-
-        "trading card games": "card games colecionáveis (TCGs)",
-
-        "collectible card game": "jogo de cartas colecionáveis",
-
-        "card game": "jogo de cartas",
-
-        "card games": "jogos de cartas",
-
-        "expansion": "expansão",
-
-        "expansions": "expansões",
-
-        "crowdfunding": "financiamento coletivo",
-
-        "new expansion": "nova expansão",
-
-        "party game": "party game festivo",
-
-        "allows players to": "permite que os jogadores",
-
-        "will enable players to": "permitirá aos jogadores",
-
-        "brings": "traz",
-
-        "revealed": "revelado",
-
-        "announced": "anunciado",
-
-        "launches": "lança",
-
-        "is coming to": "está chegando ao",
-
-        "releases": "lançamentos",
-
-        "deck-building": "construção de baralho (deckbuilding)",
-
-        "deckbuilding": "construção de baralho (deckbuilding)",
-
-        "worker placement": "alocação de trabalhadores",
-
-        "miniatures": "miniaturas",
-
-        "box set": "caixa completa",
-
-        "kickstarter": "Kickstarter",
-
-        "gamefound": "Gamefound",
-
-        "standalone game": "jogo independente",
-
-        "dungeon crawler": "dungeon crawler de exploração",
-
-        "players": "jogadores",
-
-        "rulebook": "livro de regras",
-
-        "tabletop": "mesa analógica",
-
-        "spellcaster": "conjurador de magias",
-
-        "spellcasting": "lançamento de magias",
-
-        "game master": "mestre de jogo (GM)",
-
-        "games master": "mestre de jogo (GM)",
-
-        "game design": "design de jogos",
-
-        "game designer": "designer de jogos",
-
-        "designer diary": "diário de desenvolvimento",
-
-        "designer's diary": "diário de desenvolvimento",
-
-        "designers diary": "diário de desenvolvimento",
-
-        "publisher": "editora",
-
-        "release date": "data de lançamento"
-
+        r'\bdiário do desenvolvedor\b': 'Diário de Desenvolvimento',
+        r'\bdiário do designer\b': 'Diário de Desenvolvimento',
+        r'\bdeveloper diary\b': 'Diário de Desenvolvimento',
+        r'\bdesigner diary\b': 'Diário de Desenvolvimento',
+        r'\bdev diary\b': 'Diário de Desenvolvimento',
+        r'\btabletop roleplaying game\b': 'RPG de mesa',
+        r'\btabletop roleplaying games\b': 'RPGs de mesa',
+        r'\btabletop roleplay\b': 'RPG de mesa',
+        r'\broleplaying game\b': 'RPG',
+        r'\broleplaying games\b': 'RPGs',
+        r'\bboard game\b': 'jogo de tabuleiro',
+        r'\bboard games\b': 'jogos de tabuleiro',
+        r'\btrading card game\b': 'card game colecionável (TCG)',
+        r'\btrading card games\b': 'card games colecionáveis (TCGs)',
+        r'\bcollectible card game\b': 'jogo de cartas colecionáveis',
+        r'\bcard game\b': 'jogo de cartas',
+        r'\bcard games\b': 'jogos de cartas',
+        r'\bnew expansion\b': 'nova expansão',
+        r'\bexpansion\b': 'expansão',
+        r'\bexpansions\b': 'expansões',
+        r'\bcrowdfunding\b': 'financiamento coletivo',
+        r'\bparty game\b': 'party game festivo',
+        r'\ballows players to\b': 'permite que os jogadores',
+        r'\bwill enable players to\b': 'permitirá aos jogadores',
+        r'\bdeck-building\b': 'construção de baralho (deckbuilding)',
+        r'\bdeckbuilding\b': 'construção de baralho (deckbuilding)',
+        r'\bworker placement\b': 'alocação de trabalhadores',
+        r'\bminiatures\b': 'miniaturas',
+        r'\bbox set\b': 'caixa completa',
+        r'\bstandalone game\b': 'jogo independente',
+        r'\bdungeon crawler\b': 'dungeon crawler de exploração',
+        r'\brulebook\b': 'livro de regras',
+        r'\btabletop\b': 'mesa analógica',
+        r'\bspellcaster\b': 'conjurador de magias',
+        r'\bspellcasting\b': 'lançamento de magias',
+        r'\bgame master\b': 'mestre de jogo (GM)',
+        r'\bgames master\b': 'mestre de jogo (GM)',
+        r'\bgame design\b': 'design de jogos',
+        r'\bgame designer\b': 'designer de jogos',
+        r'\brelease date\b': 'data de lançamento'
     }
-
-    for en, pt in terms.items():
-
-        res = re.sub(rf'\b{re.escape(en)}\b', pt, res, flags=re.IGNORECASE)
+    for pat, pt in terms.items():
+        res = re.sub(pat, pt, res, flags=re.IGNORECASE)
 
     return res.strip()
-
-
-
-# ------------------------------------------------------------------------------
-
-# 4. INVESTIGAÇÃO PROFUNDA & EXTRAÇÃO COMPLETA DE IMAGENS E CONTEÚDO
-
-# ------------------------------------------------------------------------------
-
 
 
 def investigate_article_content(url, raw_text=""):
@@ -651,10 +562,18 @@ def investigate_article_content(url, raw_text=""):
     # Parágrafos substanciais
     for p in article.find_all('p'):
         t = p.get_text().strip()
-        if len(t) > 60 and not any(skip in t.lower() for skip in ['cookie', 'subscribe', 'newsletter', 'privacy', 'copyright']):
-            data['paragraphs'].append(t)
-            if len(data['paragraphs']) >= 5:
-                break
+        if len(t) < 60:
+            continue
+        if any(skip in t.lower() for skip in ['cookie', 'subscribe', 'newsletter', 'privacy', 'copyright', 'all rights reserved', 'terms of service']):
+            continue
+        # Ignorar linhas de cabeçalho, autor ou data isoladas
+        if re.search(r'^(designer|developer|author|written by|posted by|published by)\b', t, re.I) and len(t) < 120:
+            continue
+        if re.search(r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},?\s+\d{4}\b', t, re.I) and len(t) < 100:
+            continue
+        data['paragraphs'].append(t)
+        if len(data['paragraphs']) >= 5:
+            break
 
     return data
 
