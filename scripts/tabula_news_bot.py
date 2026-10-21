@@ -1322,7 +1322,6 @@ def generate_editorial_post(item):
 
     <li><strong>Foco da Notícia:</strong> {source_note_safe}</li>
 
-    <li><strong>Curadoria:</strong> Redação Tábula Quadrada — Monitoramento & Radar Analógico</li>
 
   </ul>
 
@@ -1451,15 +1450,10 @@ def generate_editorial_post(item):
             *(
                 [{
                     "name": f"{game_ficha['publisher']} (Editora Oficial)",
-                    "url": "https://tabulaquadrada.com.br",
+                    "url": game_ficha.get("url_publisher") or game_ficha.get("url_ludopedia") or link,
                     "note": "Editora e publicadora responsável pela distribuição oficial do jogo."
                 }] if (game_ficha and game_ficha.get("publisher")) else []
-            ),
-            {
-                "name": "Redação Tábula Quadrada (Radar Editorial)",
-                "url": "https://tabulaquadrada.com.br",
-                "note": "Monitoramento contínuo, verificação de dados e tradução técnica por Francis Eureka."
-            }
+            )
         ],
 
         "content": content_html.strip()
