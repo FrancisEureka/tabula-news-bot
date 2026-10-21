@@ -1,0 +1,49 @@
+name: Tábula Quadrada Autonomous News Bot
+
+on:
+  schedule:
+    # Executa 3 vezes ao dia nos horários nobres editoriais (Horário de Brasília):
+    # 09:15 BRT (12:15 UTC)
+    # 14:15 BRT (17:15 UTC)
+    # 19:15 BRT (22:15 UTC)
+    - cron: '15 12,17,22 * * *'
+  workflow_dispatch: # Permite disparar manualmente pelo botão no GitHub a qualquer hora
+
+jobs:
+  publish-news:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Permite comitar o histórico atualizado de notícias no repositório
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Instalar dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Executar Tábula News Bot
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST || '108.167.151.39' }}
+          FTP_USER: ${{ secrets.FTP_USER || 'tabula71' }}
+          FTP_PASS: ${{ secrets.FTP_PASS || 'ElUrRwEflRwF82465@' }}
+          SITE_URL: 'https://tabulaquadrada.com.br'
+        run: |
+          python scripts/tabula_news_bot.py --limit 2
+
+      - name: Salvar histórico de publicações
+        if: always()
+        run: |
+          git config --global user.name "Tabula News Bot"
+          git config --global user.email "bot@tabulaquadrada.com.br"
+          git add data/published_news_history.json
+          git commit -m "chore: atualizar histórico de postagens [skip ci]" || exit 0
+          git push
