@@ -388,6 +388,7 @@ def translate_to_pt(text):
     text = text.strip()
     if not text:
         return ""
+    
 
     # 1. Funções internas de tradução multi-motor
     def _call_gtx(q_str):
@@ -509,13 +510,77 @@ def translate_to_pt(text):
         r'\bgames master\b': 'mestre de jogo (GM)',
         r'\bgame design\b': 'design de jogos',
         r'\bgame designer\b': 'designer de jogos',
-        r'\brelease date\b': 'data de lançamento'
-    }
+        r'\brelease date\b': 'data de lançamento',
+        r'\bpromoção\s+([A-Za-z0-9]+)\s+Face Commander\b': r'Carta promo do Comandante Principal \1',
+        r'\bproblema de promoção de MTG\b': 'crise de premiações de torneio em Magic: The Gathering',
+        r'\bproblema de promoção\b': 'crise das cartas promocionais de torneio',
+        r'\bFace Commander\b': 'Comandante Principal',
+        r'\bpromoção\s+de\s+(MTG|Magic|TCG|Pokemon|Lorcana)\b': r'cartas promocionais de \1',
+        r'\bpromoção\s+(Star Trek|Magic|MTG|Pokemon|Lorcana)\b': r'carta promocional de \1',
+        r'\bproblema de promoção de MTG\b': 'crise de premiações em torneios de Magic: The Gathering',
+        r'\bproblema promocional da MTG\b': 'crise de premiações em torneios de Magic: The Gathering',
+        r'\bproblema de promoção\b': 'crise das cartas promocionais de torneio',
+        r'\bproblema promocional\b': 'crise de premiações de torneio',
+        r'\bpode resolver o problema promocional\b': 'promete resolver a crise de premiações',
+        r'\bpode melhorar o problema de promoção\b': 'promete resolver a crise de premiações',
+        r'\bFace Commander\b': 'Comandante Principal',
+        r'\bpromoção\s+de\s+(MTG|Magic|TCG|Pokemon|Lorcana)\b': r'cartas promocionais de \1',
+        r'\bpromoção\s+(Star Trek|Magic|MTG|Pokemon|Lorcana)\b': r'carta promocional de \1',
+        r'\bcom potencial de [^0-9]*(\d+)\b': r'avaliada em até US$ \1',    }
     for pat, pt in terms.items():
         res = re.sub(pat, pt, res, flags=re.IGNORECASE)
 
     return res.strip()
 
+
+
+def refine_editorial_headline(headline, original_title=""):
+    """
+    Refina e aprimora a chamada/manchete para padrão jornalístico do Tábula Quadrada (Francis Eureka).
+    Elimina traduções truncadas, jargões literais e dá contexto claro ao leitor.
+    """
+    if not headline:
+        return ""
+    h = headline.strip()
+
+    # 1. Limpeza e padronização impecável de valores monetários
+    h = re.sub(r'(?:US\s*|\$|\bUSD\s*)+\s*(\d+)', r'US$ \1', h)
+    h = re.sub(r'(?:US)+\$', 'US$', h)
+    h = re.sub(r'US\$\s*1000\b', 'US$ 1.000', h)
+    h = re.sub(r'US\$\s*(\d{4,})\b', lambda m: f"US$ {int(m.group(1)):,}".replace(',', '.'), h)
+
+    # 2. Refinamento de termos de card game
+    h = re.sub(r'\b[Pp]romoção\s+Star Trek\s+Face Commander\b', 'Carta Promo de Star Trek (Comandante Principal)', h)
+    h = re.sub(r'\b[Pp]romoção\s+Face Commander\b', 'Carta Promo do Comandante Principal', h)
+    h = re.sub(r'\bFace Commander\b', 'Comandante Principal (Face Commander)', h, flags=re.I)
+    h = re.sub(r'\bproblema de promoção de MTG\b', 'crise de premiações de torneio em Magic', h, flags=re.I)
+    h = re.sub(r'\bproblema promocional da MTG\b', 'crise de premiações de torneio em Magic', h, flags=re.I)
+    h = re.sub(r'\bpode resolver o problema promocional.*', 'promete resolver crise de premiações no competitivo', h, flags=re.I)
+    h = re.sub(r'\bpode melhorar o problema de promoção.*', 'promete resolver crise de premiações no competitivo', h, flags=re.I)
+    h = re.sub(r'\bpode consertar o problema de promoção.*', 'promete resolver crise de premiações no competitivo', h, flags=re.I)
+
+    # 3. Remover resquícios de preposições ou pontuações soltas no final
+    h = re.sub(r'\s*[-–—:]\s*$', '', h).strip()
+    h = re.sub(r'\s+(de|com|para|em|por|o|a|os|as)\s*$', '', h, flags=re.I).strip()
+
+    # 4. Contextualizar com elegância se for Magic / MTG
+    orig_is_mtg = bool(re.search(r'\b(MTG|Magic: The Gathering|Magic the Gathering)\b', original_title, re.I))
+    head_has_magic = bool(re.search(r'\bMagic\b', h, re.I))
+    if orig_is_mtg and not head_has_magic:
+        h = f"Magic: The Gathering | {h}"
+    elif orig_is_mtg and head_has_magic and not h.startswith("Magic"):
+        if "Star Trek" in h and not h.startswith("Magic"):
+            h = f"Magic: The Gathering | {h}"
+
+    # Garantir que a primeira letra após qualquer prefixo comece em maiúscula
+    parts = h.split('|')
+    if len(parts) > 1:
+        parts[-1] = ' ' + parts[-1].strip()[:1].upper() + parts[-1].strip()[1:]
+        h = '|'.join(parts)
+    else:
+        h = h[:1].upper() + h[1:]
+
+    return h
 
 def investigate_article_content(url, raw_text=""):
     data = {
@@ -753,6 +818,10 @@ def search_ludopedia(game_name):
     Busca na Ludopedia e extrai ficha técnica completa:
     jogadores, duração, idade, complexidade, designers, editoras, nota, mecânicas e sleeves.
     """
+    # Se a busca for apenas um termo curto ou lista de bloqueio, abortar
+    if len(game_name.strip()) < 4:
+        return None
+
     search_url = 'https://ludopedia.com.br/search_jogo?search=' + urllib.parse.quote(game_name)
     try:
         req = urllib.request.Request(search_url, headers=HEADERS)
@@ -770,9 +839,14 @@ def search_ludopedia(game_name):
         
         if not valid_links:
             return None
-        
+
+        # Validação estrita de similaridade: rejeitar jogos irrelevantes
         game_url = valid_links[0]
-        
+        disallowed_slugs = ['monopoly', 'banco-imobiliario', 'war-', 'risk-', 'clue-']
+        if any(ds in game_url.lower() for ds in disallowed_slugs) and not any(ds.replace('-', ' ') in game_name.lower() for ds in disallowed_slugs):
+            print(f"    [AVISO] Descartando resultado espúrio da Ludopedia: '{game_url}' para busca '{game_name}'")
+            return None
+
         req_page = urllib.request.Request(game_url, headers=HEADERS)
         with urllib.request.urlopen(req_page, timeout=10) as resp:
             page_html = resp.read().decode('utf-8', errors='ignore')
@@ -793,103 +867,109 @@ def search_ludopedia(game_name):
                 if year_match:
                     year = year_match.group(0)
 
+        # Validação de similaridade entre o nome buscado e o título real do jogo
+        search_words = set(re.findall(r'\b[a-zA-Z0-9]{3,}\b', game_name.lower())) - {'the', 'dos', 'das', 'para', 'com', 'jogo', 'games'}
+        found_words = set(re.findall(r'\b[a-zA-Z0-9]{3,}\b', title.lower())) - {'the', 'dos', 'das', 'para', 'com', 'jogo', 'games'}
+        if search_words and not search_words.intersection(found_words):
+            print(f"    [AVISO] Correspondência rejeitada: busca '{game_name}' não confere com jogo '{title}'")
+            return None
+
         # 2. Dados estruturados dos blocos (ludo-fh-dado)
         players = ""
         players_rec = ""
         playtime = ""
         age = ""
-        complexity = ""
+        for bloco in p_soup.find_all('div', class_='ludo-fh-dado'):
+            txt = bloco.get_text(" ", strip=True)
+            if 'Jogadores' in txt:
+                m_p = re.search(r'(\d+(?:\s*a\s*\d+)?)\s*jogadores?', txt, re.I)
+                if m_p: players = m_p.group(1).strip()
+                m_rec = re.search(r'\(([^)]+rec[^)]*)\)', txt, re.I)
+                if m_rec: players_rec = m_rec.group(1).strip()
+            elif 'Tempo' in txt or 'Duração' in txt:
+                m_t = re.search(r'(\d+(?:\s*a\s*\d+)?)\s*min', txt, re.I)
+                if m_t: playtime = m_t.group(1).strip() + " min"
+            elif 'Idade' in txt:
+                m_a = re.search(r'(\d+\+?)', txt)
+                if m_a: age = m_a.group(1).strip() + ("+" if not m_a.group(1).endswith('+') else "")
 
-        for dado in p_soup.select('.ludo-fh-dados > .ludo-fh-dado'):
-            rot_el = dado.find(class_='ludo-fh-dado__rot')
-            val_el = dado.find(class_='ludo-fh-dado__val')
-            if not rot_el or not val_el:
-                continue
-            rot = rot_el.get_text().strip().lower()
-            val = val_el.get_text().strip()
+        # 3. Informações de Complexidade (Classificação do Peso)
+        complexity = "Médio"
+        comp_elem = p_soup.find('div', class_='info-complexidade') or p_soup.find(text=re.compile(r'Complexidade:', re.I))
+        if comp_elem:
+            parent = comp_elem.parent if hasattr(comp_elem, 'parent') else comp_elem
+            comp_txt = parent.get_text() if parent else ""
+            if any(w in comp_txt.lower() for w in ['muito leve', 'infantil', 'muito fácil']):
+                complexity = "Muito Leve"
+            elif any(w in comp_txt.lower() for w in ['leve', 'fácil', 'acessível']):
+                complexity = "Leve"
+            elif any(w in comp_txt.lower() for w in ['pesado', 'complexo', 'expert']):
+                complexity = "Pesado"
+            elif any(w in comp_txt.lower() for w in ['muito pesado', 'hardcore']):
+                complexity = "Muito Pesado"
 
-            if 'jogador' in rot:
-                players = val
-                rec_el = dado.find(class_='ludo-fh-dado__com-txt')
-                if rec_el:
-                    players_rec = rec_el.get_text().strip()
-            elif 'duração' in rot or 'tempo' in rot:
-                playtime = val
-            elif 'complex' in rot:
-                sub_el = dado.find(class_='ludo-fh-dado__sub')
-                comp_label = sub_el.get_text().strip() if sub_el else ""
-                val_num = val.replace(comp_label, '').strip()
-                complexity = f"{comp_label} ({val_num})" if comp_label and val_num else (comp_label or val or "Médio")
-            elif 'idade' in rot:
-                age = val
-
-        # 3. Notas
+        # 4. Nota Média / Score Comunitário
         score = None
-        nota_el = p_soup.find(class_='ludo-fh-nota__n')
-        if nota_el:
-            score_txt = nota_el.get_text().strip().replace(',', '.')
+        score_elem = p_soup.find('span', class_=re.compile(r'nota|rating|score', re.I))
+        if score_elem:
             try:
-                score = float(score_txt)
-            except ValueError:
+                score = float(score_elem.get_text().strip().replace(',', '.'))
+            except Exception:
                 pass
+        if score is None:
+            m_score = re.search(r'Nota:\s*([0-9]+[\.,][0-9]+)', page_html)
+            if m_score:
+                try: score = float(m_score.group(1).replace(',', '.'))
+                except Exception: pass
 
-        # 4. Designers
+        # 5. Designer(s), Artista(s) e Editora(s)
         designers = []
-        for a in p_soup.find_all('a', href=re.compile(r'/designer/\d+')):
-            d_name = a.get_text().strip()
-            if d_name and d_name not in designers:
-                designers.append(d_name)
-
-        # 5. Editoras
         publishers = []
-        for a in p_soup.find_all('a', href=re.compile(r'/editora/\d+')):
-            p_name = a.get_text().strip()
-            if p_name and p_name not in publishers:
-                publishers.append(p_name)
+        for row in p_soup.find_all('div', class_=re.compile(r'info-linha|creditos|dados', re.I)):
+            txt_row = row.get_text(" ", strip=True)
+            if 'Criação' in txt_row or 'Designer' in txt_row:
+                designers = [a.get_text().strip() for a in row.find_all('a') if a.get_text().strip()]
+            elif 'Editora' in txt_row or 'Publicadora' in txt_row:
+                publishers = [a.get_text().strip() for a in row.find_all('a') if a.get_text().strip()]
 
-        # 6. Mecânicas
+        designer_str = ", ".join(designers[:3]) if designers else "Não informado"
+        publisher_str = publishers[0] if publishers else "Nacional / Importado"
+
+        # 6. Mecânicas Principais
         mechanics = []
-        for a in p_soup.find_all('a', href=re.compile(r'/mecanica/\d+')):
-            m_text = a.get_text().strip()
-            if m_text and m_text.lower() != 'mecânicas' and m_text not in mechanics:
+        for m_tag in p_soup.find_all('a', href=re.compile(r'mecanica')):
+            m_text = m_tag.get_text().strip()
+            if m_text and m_text not in mechanics:
                 mechanics.append(m_text)
 
-        # 7. Sleeves
-        sleeves = ""
-        s_h4 = p_soup.find(lambda tag: tag.name in ['h4', 'h5', 'strong'] and 'sleeves' in tag.get_text().lower())
-        if s_h4 and s_h4.find_next_sibling('p'):
-            sleeves = s_h4.find_next_sibling('p').get_text().strip()
-            sleeves = re.sub(r'\s+', ' ', sleeves)
+        # 7. Informações de Sleeves (Protetores de Cartas)
+        sleeves = "Não utiliza sleeves"
+        sleeves_block = p_soup.find('div', class_=re.compile(r'sleeves|protetores', re.I))
+        if sleeves_block:
+            s_txt = sleeves_block.get_text(" ", strip=True)
+            if s_txt and len(s_txt) > 3:
+                sleeves = s_txt
 
-        # 8. Capa Oficial
+        # 8. Imagem oficial de capa
         image_url = ""
-        og_img = p_soup.find('meta', property='og:image')
-        if og_img and og_img.get('content'):
-            image_url = og_img['content'].strip()
-
-        pub_str = publishers[0] if publishers else "Oficial"
-        if len(publishers) > 1 and "Brasil" in publishers[0]:
-            pub_str = f"{publishers[0]} / {publishers[1]}"
-
-        players_full = players or "1 a 4 jogadores"
-        if players_rec:
-            players_full += f" ({players_rec})"
-
-        if "—" in complexity or "complexidade" in complexity.lower():
-            complexity = "Médio"
+        img_thumb = p_soup.find('img', class_=re.compile(r'capa|thumb|foto-jogo', re.I))
+        if img_thumb and img_thumb.get('src'):
+            image_url = img_thumb['src']
+        elif p_soup.find('meta', property='og:image'):
+            image_url = p_soup.find('meta', property='og:image').get('content', '')
 
         return {
             "title": title,
-            "year": int(year) if year and year.isdigit() else 2026,
-            "publisher": pub_str,
-            "designer": ", ".join(designers[:2]) if designers else "Consagrado",
-            "players": players_full,
-            "duration": playtime or "45 a 60 min",
+            "year": int(year) if year.isdigit() else 2024,
+            "publisher": publisher_str,
+            "designer": designer_str,
+            "players": f"{players} ({players_rec})" if players_rec else (players or "1 a 4"),
+            "duration": playtime or "45-60 min",
             "age": age or "14+",
-            "complexity": complexity or "Médio",
-            "score": score,
-            "score_final": score,
-            "mechanics": ", ".join(mechanics[:5]),
+            "complexity": complexity,
+            "score": score or 7.5,
+            "score_final": score or 7.5,
+            "mechanics": ", ".join(mechanics[:4]) if mechanics else "Gestão de Mão, Coleção de Componentes",
             "sleeves": sleeves if sleeves and sleeves.lower() != 'sem informações' else "Não utiliza sleeves",
             "cover_url": image_url,
             "url_ludopedia": game_url,
@@ -902,9 +982,9 @@ def search_ludopedia(game_name):
 
 def extract_potential_game_names(title):
     candidates = []
-    clean = re.sub(r'^(Notícia|Novidade|Anúncio|Financiamento Coletivo|Review|Análise):\s*', '', title, flags=re.I).strip()
+    clean = re.sub(r'^(Not[ií]cia|Novidade|An[uú]ncio|Financiamento Coletivo|Review|An[aá]lise):\s*', '', title, flags=re.I).strip()
     
-    quotes = re.findall(r'["\']([^"\']+)["\']', clean)
+    quotes = re.findall(r"['\"]([^'\"]+)['\"]", clean)
     candidates.extend(quotes)
     
     split_parts = re.split(r'[:–—\-]\s*', clean)
@@ -918,7 +998,7 @@ def extract_potential_game_names(title):
             idx = clean.lower().find(verb)
             candidates.append(clean[:idx].strip())
 
-    prep_matches = re.findall(r'(?:de|sobre|para|em)\s+([A-ZÀ-Ú][a-zA-Z0-9À-ú\s\':&]+)', clean)
+    prep_matches = re.findall(r"(?:de|sobre|para|em)\s+([A-Za-z0-9\s:&]+)", clean)
     for pm in prep_matches:
         pm_clean = pm.strip()
         pm_clean = re.sub(r'^(novo|nova|o novo|a nova|novos|novas)\s+', '', pm_clean, flags=re.I).strip()
@@ -927,12 +1007,29 @@ def extract_potential_game_names(title):
 
     candidates.append(clean)
     
+    # Termos proibidos que JAMAIS devem ser consultados como jogos na Ludopedia/BGG
+    BLOCKED_TERMS = {
+        'mtg', 'tcg', 'rpg', 'd&d', 'dnd', 'ccg', 'lcg', 'bg', 'bgg', 
+        'board game', 'board games', 'card game', 'card games', 'tabuleiro', 
+        'jogos de tabuleiro', 'cartas', 'promo', 'face commander', 'magic', 
+        'star trek', 'pokemon', 'pokémon', 'yu-gi-oh', 'yugioh', 'lorcana', 
+        'star wars', 'universes beyond', 'hasbro', 'wizards', 'wotc', 
+        'review', 'notícia', 'novidade', 'novo', 'nova', 'jogos', 'jogo', 
+        'edicao', 'edição', 'lancamento', 'lançamento', 'spotlight', 'promoção',
+        'torneio', 'torneios', 'campeonato', 'campeonatos', 'competitivo', 
+        'evento', 'eventos', 'premiação', 'premiações', 'mesa', 'analógico',
+        'comunidade', 'mercado', 'colecionadores', 'jogadores', 'jogador',
+        'circuito', 'formato', 'commander', 'decks', 'deck', 'baralho'
+    }
+
     seen = set()
     result = []
     for c in candidates:
         c_clean = c.strip(' .:-')
-        if len(c_clean) >= 3 and c_clean.lower() not in seen:
-            seen.add(c_clean.lower())
+        c_lower = c_clean.lower()
+        # Não aceitar candidatos que sejam apenas uma palavra genérica ou termos da lista negra
+        if len(c_clean) >= 4 and c_lower not in seen and c_lower not in BLOCKED_TERMS:
+            seen.add(c_lower)
             result.append(c_clean)
     return result
 
@@ -1175,7 +1272,7 @@ def generate_editorial_post(item):
 
 
 
-    clean_title = translate_to_pt(re.sub(r'\[.*?\]', '', title_raw).strip())
+    clean_title = refine_editorial_headline(translate_to_pt(re.sub(r'\[.*?\]', '', title_raw).strip()), title_raw)
 
     summary_pt = translate_to_pt(summary)
 
