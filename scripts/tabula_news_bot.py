@@ -1616,6 +1616,14 @@ def sync_to_server(local_post):
 
 
 
+        # Garantir autoria incondicional de Francis Eureka para todas as postagens do bot
+        local_post['author'] = 'Francis Eureka'
+        local_post['author_slug'] = 'francis-eureka'
+        if 'tags' in local_post and isinstance(local_post['tags'], list):
+            local_post['tags'] = [t for t in local_post['tags'] if t not in ['Emmanuel Deodato', 'Renato', 'Renato J. Lopes']]
+            if 'Francis Eureka' not in local_post['tags']:
+                local_post['tags'].append('Francis Eureka')
+
         # Inserir no topo
 
         remote_posts.insert(0, local_post)
@@ -1674,8 +1682,10 @@ def sync_to_server(local_post):
             # Ordenar posts por data
             remote_posts.sort(key=lambda x: str(x.get('date', '')), reverse=True)
             for p in remote_posts[:25]:
-                if not p.get('author') or 'Renato' in p.get('author', ''):
+                # Regra Absoluta: Todas as matérias publicadas/gerenciadas pelo bot são em nome de Francis Eureka
+                if not p.get('author') or any(ign in str(p.get('author', '')) for ign in ['Renato', 'Emmanuel Deodato', 'Redação', 'Bot', 'Admin']):
                     p['author'] = 'Francis Eureka'
+                    p['author_slug'] = 'francis-eureka'
 
             lead_p = remote_posts[0]
             subs_p = remote_posts[1:5]
